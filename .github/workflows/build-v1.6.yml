@@ -1,4 +1,4 @@
-name: Build Pocket AI APK
+name: Build Pocket AI v1.6
 
 on:
   pull_request:
@@ -38,7 +38,7 @@ jobs:
       - name: Align APK
         run: "$ANDROID_HOME/build-tools/35.0.0/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk PocketAI-v1.6-aligned-unsigned.apk
 
-      - name: Upload APK
+      - name: Upload aligned APK
         uses: actions/upload-artifact@v4
         with:
           name: PocketAI-v1.6-aligned

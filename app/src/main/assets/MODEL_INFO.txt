@@ -1,8 +1,11 @@
-Pocket AI runtime model
-Qwen3-4B-Instruct-2507 Q6_K GGUF
-Source: https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF
-Filename: Qwen_Qwen3-4B-Instruct-2507-Q6_K.gguf
-Size: approximately 3.31 GB
-SHA-256: 324bcc583feabe9485df2521099bf913e2613048e7aa2bdcdbfe74f1acc7531e
+Pocket AI model
 
-The model is NOT bundled in the APK. Pocket AI downloads and verifies this exact model at runtime.
+Model: Qwen3-1.7B
+Quantization: Q4_K_M
+GGUF file: Qwen_Qwen3-1.7B-Q4_K_M.gguf
+Source: bartowski/Qwen_Qwen3-1.7B-GGUF on Hugging Face
+Expected size: 1,282,439,584 bytes
+SHA-256: 72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb
+
+The model is downloaded on first launch and stored in the app's private models directory.
+Pocket AI v1.5 removes obsolete GGUF models from that directory before downloading this model.
