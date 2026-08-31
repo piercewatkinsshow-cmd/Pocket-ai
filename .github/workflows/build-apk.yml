@@ -12,6 +12,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Apply v1.6 integration fixes
+        run: git apply --check ci/v1.6.patch && git apply ci/v1.6.patch
+
       - name: Set up Java 17
         uses: actions/setup-java@v4
         with:
@@ -29,12 +32,15 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build unsigned release APK
+      - name: Build release APK
         run: gradle :app:assembleRelease --stacktrace
+
+      - name: Align APK
+        run: "$ANDROID_HOME/build-tools/35.0.0/zipalign" -p -f 4 app/build/outputs/apk/release/app-release-unsigned.apk PocketAI-v1.6-aligned-unsigned.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: PocketAI-v1.4-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: PocketAI-v1.6-aligned
+          path: PocketAI-v1.6-aligned-unsigned.apk
           if-no-files-found: error
