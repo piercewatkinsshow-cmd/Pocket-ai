@@ -1,0 +1,78 @@
+name: Build AI Fantasy Football UI V2
+
+on:
+  push:
+    branches: [windows-ui-v2]
+    paths:
+      - 'windows-ui-v2/**'
+      - 'windows-ui-v2-fixes/**'
+      - '.github/workflows/build-windows-ui-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Reconstruct V2 source
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem windows-ui-v2/chunk*.txt | Sort-Object Name
+          if ($parts.Count -ne 8) { throw "Expected 8 V2 source chunks, found $($parts.Count)." }
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('windows-ui-v2-src.zip', [Convert]::FromBase64String($b64))
+          Expand-Archive windows-ui-v2-src.zip -DestinationPath src-v2 -Force
+          if (Test-Path 'windows-ui-v2-fixes') {
+            Get-ChildItem windows-ui-v2-fixes -File | ForEach-Object {
+              Copy-Item $_.FullName (Join-Path 'src-v2' $_.Name) -Force
+              Write-Host "Applied V2 source override: $($_.Name)"
+            }
+          }
+          if (!(Test-Path 'src-v2/AIFantasyFootballV2.csproj')) { throw 'V2 source project was not reconstructed.' }
+          Get-ChildItem src-v2 | Select-Object Name,Length
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore src-v2/AIFantasyFootballV2.csproj
+
+      - name: Publish self-contained Windows x64 EXE
+        shell: pwsh
+        run: |
+          dotnet publish src-v2/AIFantasyFootballV2.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o publish-v2
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'publish-v2/AI-Fantasy-Football.exe')) { throw 'V2 EXE was not produced.' }
+          Get-Item 'publish-v2/AI-Fantasy-Football.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'publish-v2/AI-Fantasy-Football.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package documentation
+        shell: pwsh
+        run: Copy-Item 'src-v2/README.md' 'publish-v2/README.txt'
+
+      - name: Upload Windows V2 build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Fantasy-Football-Windows-UI-V2
+          path: publish-v2/**
+          if-no-files-found: error
+          retention-days: 30
