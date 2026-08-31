@@ -1,0 +1,7 @@
+Pocket AI uses llama-android for local GGUF inference.
+
+Runtime model: Qwen3-4B-Instruct-2507 Q6_K GGUF
+Quantization repository: bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF
+Original model: Qwen/Qwen3-4B-Instruct-2507
+
+The model binary is not contained in the application source or APK. The app downloads the selected GGUF at runtime and verifies its SHA-256 before loading it.
