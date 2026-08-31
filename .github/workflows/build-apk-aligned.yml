@@ -1,0 +1,49 @@
+name: Build Pocket AI Aligned APK
+
+on:
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android 35
+        run: sdkmanager "platforms;android-35" "build-tools;35.0.0"
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Build release APK
+        run: gradle :app:assembleRelease --stacktrace
+
+      - name: Align APK
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -p -f 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            app/build/outputs/apk/release/PocketAI-v1.4-aligned-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" \
+            app/build/outputs/apk/release/apksigner.jar
+
+      - name: Upload aligned APK and signer
+        uses: actions/upload-artifact@v4
+        with:
+          name: PocketAI-v1.4-aligned-signing-tools
+          path: |
+            app/build/outputs/apk/release/PocketAI-v1.4-aligned-unsigned.apk
+            app/build/outputs/apk/release/apksigner.jar
+          if-no-files-found: error
