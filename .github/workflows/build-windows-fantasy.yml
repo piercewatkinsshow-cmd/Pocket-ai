@@ -5,6 +5,7 @@ on:
     branches: [windows-fantasy-football]
     paths:
       - 'windows-build/**'
+      - 'windows-fixes/**'
       - '.github/workflows/build-windows-fantasy.yml'
   workflow_dispatch:
 
@@ -31,6 +32,12 @@ jobs:
           $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
           [IO.File]::WriteAllBytes('windows-src.zip', [Convert]::FromBase64String($b64))
           Expand-Archive windows-src.zip -DestinationPath src -Force
+          if (Test-Path 'windows-fixes') {
+            Get-ChildItem windows-fixes -File | ForEach-Object {
+              Copy-Item $_.FullName (Join-Path 'src' $_.Name) -Force
+              Write-Host "Applied source override: $($_.Name)"
+            }
+          }
           if (!(Test-Path 'src/AIFantasyFootball.csproj')) { throw 'Source project was not reconstructed.' }
 
       - name: Restore
