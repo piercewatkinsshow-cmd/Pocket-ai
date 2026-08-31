@@ -1,13 +1,13 @@
-# Pocket AI v1.5
+# Pocket AI v1.7
 
-Offline Android chat app using Qwen3-1.7B Q4_K_M.
+Pocket AI continues to use **Qwen3-1.7B Q4_K_M** (~1.28 GB) for offline inference. Existing v1.6 installations keep the already-downloaded model.
 
-## v1.5 changes
-- Replaces the previous Qwen3 4B Q6_K model with Qwen3 1.7B Q4_K_M (~1.28 GB).
-- Deletes obsolete GGUF model files from the app's private model directory on startup.
-- Adds Fast mode (default) using Qwen3 `/no_think`.
-- Adds Thinking mode using Qwen3 `/think` for harder questions.
-- Keeps a 2048-token context and the existing 64dp bottom navigation clearance.
-- Shows generation speed in tokens/second after each response.
+## v1.7 controls
+- **Fast / Balanced / Smart** presets for response budget, context size, and conversation memory.
+- **Thinking On/Off** toggle using Qwen3 `/think` and `/no_think`.
+- Simple **Factual ↔ Creative** slider that adjusts sampling conservativeness.
+- Settings are remembered between launches.
+- Configuration changes are applied automatically before the next message.
+- The 64dp bottom navigation clearance remains in place.
 
-The GGUF model is not bundled in the APK. It downloads once, verifies SHA-256, then runs offline.
+No model weights are bundled in the APK.
