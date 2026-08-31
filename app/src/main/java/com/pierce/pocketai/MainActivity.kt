@@ -5,6 +5,7 @@ import android.graphics.Color
 import android.graphics.Typeface
 import android.os.Build
 import android.os.Bundle
+import android.os.StatFs
 import android.text.InputType
 import android.view.Gravity
 import android.view.View
@@ -17,7 +18,6 @@ import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.ScrollView
 import android.widget.TextView
-import android.os.StatFs
 import dev.ffmpegkit.llama.Llama
 import dev.ffmpegkit.llama.LlamaConfig
 import dev.ffmpegkit.llama.LlamaModel
@@ -35,12 +35,22 @@ import kotlin.math.min
 
 class MainActivity : Activity() {
     companion object {
-        private const val MODEL_FILE = "Qwen_Qwen3-4B-Instruct-2507-Q6_K.gguf"
-        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF/resolve/main/Qwen_Qwen3-4B-Instruct-2507-Q6_K.gguf?download=true"
-        private const val MODEL_SHA256 = "324bcc583feabe9485df2521099bf913e2613048e7aa2bdcdbfe74f1acc7531e"
-        private const val MODEL_MIN_BYTES = 3_250_000_000L
+        private const val MODEL_FILE = "Qwen_Qwen3-1.7B-Q4_K_M.gguf"
+        private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf?download=true"
+        private const val MODEL_SHA256 = "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb"
+        private const val MODEL_EXPECTED_BYTES = 1_282_439_584L
         private const val SYSTEM_PROMPT =
             "You are Pocket AI, a concise and helpful offline assistant. Be accurate and admit uncertainty."
+    }
+
+    private enum class ResponseMode(
+        val label: String,
+        val directive: String,
+        val maxTokens: Int,
+        val historyTurns: Int,
+    ) {
+        FAST("Fast", "/no_think", 256, 3),
+        THINKING("Thinking", "/think", 512, 4),
     }
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
@@ -52,8 +62,12 @@ class MainActivity : Activity() {
     private lateinit var scroll: ScrollView
     private lateinit var input: EditText
     private lateinit var send: Button
+    private lateinit var fastButton: Button
+    private lateinit var thinkingButton: Button
 
     private var model: LlamaModel? = null
+    private var responseMode = ResponseMode.FAST
+    private var generationBusy = true
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -112,9 +126,32 @@ class MainActivity : Activity() {
             text = "Preparing offline AI…"
             textSize = 13f
             setTextColor(Color.DKGRAY)
-            setPadding(0, dp(3), 0, dp(8))
+            setPadding(0, dp(3), 0, dp(6))
         }
         root.addView(status, LinearLayout.LayoutParams(-1, -2))
+
+        val modeRow = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            setPadding(0, 0, 0, dp(6))
+        }
+
+        fastButton = Button(this).apply {
+            text = "Fast ✓"
+            setAllCaps(false)
+            minHeight = dp(42)
+            setOnClickListener { selectMode(ResponseMode.FAST) }
+        }
+        modeRow.addView(fastButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginEnd = dp(6) })
+
+        thinkingButton = Button(this).apply {
+            text = "Thinking"
+            setAllCaps(false)
+            minHeight = dp(42)
+            setOnClickListener { selectMode(ResponseMode.THINKING) }
+        }
+        modeRow.addView(thinkingButton, LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = dp(6) })
+        root.addView(modeRow, LinearLayout.LayoutParams(-1, -2))
 
         progress = ProgressBar(this).apply { isIndeterminate = true }
         root.addView(progress, LinearLayout.LayoutParams(-1, dp(4)))
@@ -129,7 +166,7 @@ class MainActivity : Activity() {
         }
         root.addView(scroll, LinearLayout.LayoutParams(-1, 0, 1f))
 
-        addMessage("AI", "Hello. I run entirely on this phone. Ask me something.")
+        addMessage("AI", "Hello. I run entirely on this phone. Fast mode is on by default; use Thinking for harder questions.")
 
         val composer = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -164,21 +201,40 @@ class MainActivity : Activity() {
 
         setContentView(root)
         root.requestApplyInsets()
+        updateModeButtons()
+    }
+
+    private fun selectMode(mode: ResponseMode) {
+        if (generationBusy || model == null) return
+        responseMode = mode
+        updateModeButtons()
+        status.text = "Offline · Qwen3 1.7B · ${mode.label} mode"
+    }
+
+    private fun updateModeButtons() {
+        if (!::fastButton.isInitialized || !::thinkingButton.isInitialized) return
+        fastButton.text = if (responseMode == ResponseMode.FAST) "Fast ✓" else "Fast"
+        thinkingButton.text = if (responseMode == ResponseMode.THINKING) "Thinking ✓" else "Thinking"
+        fastButton.alpha = if (responseMode == ResponseMode.FAST) 1f else 0.62f
+        thinkingButton.alpha = if (responseMode == ResponseMode.THINKING) 1f else 0.62f
+        val enabled = !generationBusy && model != null
+        fastButton.isEnabled = enabled
+        thinkingButton.isEnabled = enabled
     }
 
     private fun prepareModel() {
-        setBusy("Checking Qwen3 model…")
+        setBusy("Replacing previous model with Qwen3 1.7B…")
         scope.launch {
             try {
                 val modelFile = withContext(Dispatchers.IO) { downloadModelIfNeeded() }
-                status.text = "Loading AI…"
+                status.text = "Loading Qwen3 1.7B…"
                 val threads = min(4, Runtime.getRuntime().availableProcessors().coerceAtLeast(1))
                 val loadedModel = Llama.loadModel(
                     modelFile.absolutePath,
                     LlamaConfig(contextSize = 2048, threads = threads),
                 )
                 model = loadedModel
-                setReady("Offline · Qwen3 4B · Q6_K")
+                setReady("Offline · Qwen3 1.7B · Fast mode")
             } catch (t: Throwable) {
                 setError("Could not load AI: ${t.message ?: t.javaClass.simpleName}")
             }
@@ -187,23 +243,26 @@ class MainActivity : Activity() {
 
     private fun downloadModelIfNeeded(): File {
         val dir = File(filesDir, "models").apply { mkdirs() }
-        val target = File(dir, MODEL_FILE)
+        cleanupObsoleteModels(dir)
 
+        val target = File(dir, MODEL_FILE)
         if (target.exists()) {
-            if (target.length() >= MODEL_MIN_BYTES && sha256(target) == MODEL_SHA256) return target
+            if (target.length() == MODEL_EXPECTED_BYTES && sha256(target) == MODEL_SHA256) return target
             target.delete()
         }
 
         val partial = File(dir, "$MODEL_FILE.part")
+        if (partial.exists() && partial.length() > MODEL_EXPECTED_BYTES) partial.delete()
         var downloaded = if (partial.exists()) partial.length() else 0L
-        val required = (MODEL_MIN_BYTES - downloaded).coerceAtLeast(0L) + 350_000_000L
+
+        val required = (MODEL_EXPECTED_BYTES - downloaded).coerceAtLeast(0L) + 250_000_000L
         if (StatFs(dir.absolutePath).availableBytes < required) {
             error("Not enough storage. Free at least %.1f GB and try again.".format(required / 1e9))
         }
 
         withContextProgress(
-            if (downloaded > 0) "Qwen3 4B Q6_K · resuming download…" else "Qwen3 4B Q6_K · downloading…",
-            0,
+            if (downloaded > 0) "Qwen3 1.7B Q4_K_M · resuming download…" else "Qwen3 1.7B Q4_K_M · downloading…",
+            ((downloaded * 100) / MODEL_EXPECTED_BYTES).toInt().coerceIn(0, 100),
         )
 
         var current = URL(MODEL_URL)
@@ -213,7 +272,7 @@ class MainActivity : Activity() {
             connection.instanceFollowRedirects = false
             connection.connectTimeout = 30_000
             connection.readTimeout = 60_000
-            connection.setRequestProperty("User-Agent", "PocketAI/1.4")
+            connection.setRequestProperty("User-Agent", "PocketAI/1.5")
             if (downloaded > 0) connection.setRequestProperty("Range", "bytes=$downloaded-")
             connection.connect()
 
@@ -236,10 +295,6 @@ class MainActivity : Activity() {
                 error("Model download failed: HTTP $code")
             }
 
-            val total = if (connection.contentLengthLong > 0) {
-                downloaded + connection.contentLengthLong
-            } else 3_310_000_000L
-
             connection.inputStream.buffered().use { inputStream ->
                 java.io.FileOutputStream(partial, downloaded > 0).buffered().use { output ->
                     val buffer = ByteArray(1024 * 1024)
@@ -249,13 +304,13 @@ class MainActivity : Activity() {
                         if (count < 0) break
                         output.write(buffer, 0, count)
                         downloaded += count
-                        val percent = ((downloaded * 100) / total).toInt().coerceIn(0, 100)
+                        val percent = ((downloaded * 100) / MODEL_EXPECTED_BYTES).toInt().coerceIn(0, 100)
                         if (percent != lastPercent) {
                             lastPercent = percent
                             val doneGb = downloaded / 1_000_000_000.0
-                            val totalGb = total / 1_000_000_000.0
+                            val totalGb = MODEL_EXPECTED_BYTES / 1_000_000_000.0
                             withContextProgress(
-                                "Qwen3 4B Q6_K · %.2f / %.2f GB · %d%%".format(doneGb, totalGb, percent),
+                                "Qwen3 1.7B Q4_K_M · %.2f / %.2f GB · %d%%".format(doneGb, totalGb, percent),
                                 percent,
                             )
                         }
@@ -266,8 +321,10 @@ class MainActivity : Activity() {
             break
         }
 
-        if (partial.length() < MODEL_MIN_BYTES) error("Downloaded Qwen3 model is incomplete")
-        withContextProgress("Qwen3 4B Q6_K · verifying…", 100)
+        if (partial.length() != MODEL_EXPECTED_BYTES) {
+            error("Downloaded Qwen3 model is incomplete (${partial.length()} of $MODEL_EXPECTED_BYTES bytes)")
+        }
+        withContextProgress("Qwen3 1.7B Q4_K_M · verifying…", 100)
         if (sha256(partial) != MODEL_SHA256) {
             partial.delete()
             error("Qwen3 model verification failed. Download removed; retry the app.")
@@ -277,6 +334,15 @@ class MainActivity : Activity() {
             partial.delete()
         }
         return target
+    }
+
+    private fun cleanupObsoleteModels(dir: File) {
+        dir.listFiles()?.forEach { file ->
+            val isModelFile = file.name.endsWith(".gguf", ignoreCase = true) ||
+                file.name.endsWith(".gguf.part", ignoreCase = true)
+            val keep = file.name == MODEL_FILE || file.name == "$MODEL_FILE.part"
+            if (isModelFile && !keep) file.delete()
+        }
     }
 
     private fun sha256(file: File): String {
@@ -295,6 +361,7 @@ class MainActivity : Activity() {
     private fun withContextProgress(message: String, percent: Int) {
         runOnUiThread {
             status.text = message
+            progress.visibility = View.VISIBLE
             progress.isIndeterminate = false
             progress.max = 100
             progress.progress = percent
@@ -308,39 +375,54 @@ class MainActivity : Activity() {
 
         input.setText("")
         addMessage("You", text)
-        setBusy("Thinking…")
+        setBusy(if (responseMode == ResponseMode.THINKING) "Thinking deeply…" else "Thinking…")
 
-        val prompt = buildPrompt(text)
+        val modeForRequest = responseMode
+        val prompt = buildPrompt(text, modeForRequest)
         scope.launch {
             try {
                 val result = Llama.complete(
                     loadedModel,
                     prompt = prompt,
                     systemPrompt = SYSTEM_PROMPT,
-                    maxTokens = 256,
+                    maxTokens = modeForRequest.maxTokens,
                 )
-                val answer = result.text.trim().ifEmpty { "I couldn't produce a response." }
+                val answer = cleanModelOutput(result.text).ifEmpty { "I couldn't produce a response." }
                 history.addLast(text to answer)
                 while (history.size > 5) history.removeFirst()
                 addMessage("AI", answer)
-                setReady("Offline · %.1f tok/s".format(result.tokensPerSecond))
+                setReady(
+                    "Offline · ${modeForRequest.label} · %.1f tok/s".format(result.tokensPerSecond),
+                )
             } catch (t: Throwable) {
                 addMessage("AI", "Error: ${t.message ?: "generation failed"}")
-                setReady("Offline · ready")
+                setReady("Offline · Qwen3 1.7B · ${responseMode.label} mode")
             }
         }
     }
 
-    private fun buildPrompt(newMessage: String): String = buildString {
-        if (history.isNotEmpty()) {
+    private fun buildPrompt(newMessage: String, mode: ResponseMode): String = buildString {
+        val recent = history.toList().takeLast(mode.historyTurns)
+        if (recent.isNotEmpty()) {
             append("Conversation so far:\n")
-            history.forEach { (user, assistant) ->
+            recent.forEach { (user, assistant) ->
                 append("User: ").append(user).append('\n')
                 append("Assistant: ").append(assistant).append('\n')
             }
             append('\n')
         }
-        append("User: ").append(newMessage).append("\nAssistant:")
+        append("User: ").append(newMessage).append(' ').append(mode.directive)
+        append("\nAssistant:")
+    }
+
+    private fun cleanModelOutput(raw: String): String {
+        val text = raw.trim()
+        val endThink = text.lastIndexOf("</think>")
+        if (endThink >= 0) return text.substring(endThink + "</think>".length).trim()
+        if (text.startsWith("<think>")) {
+            return "I used the available response budget while reasoning. Try a narrower question or switch to Fast mode."
+        }
+        return text
     }
 
     private fun addMessage(who: String, text: String) {
@@ -360,25 +442,32 @@ class MainActivity : Activity() {
     }
 
     private fun setBusy(message: String) {
+        generationBusy = true
         status.text = message
         progress.visibility = View.VISIBLE
+        progress.isIndeterminate = true
         send.isEnabled = false
         input.isEnabled = false
+        updateModeButtons()
     }
 
     private fun setReady(message: String) {
+        generationBusy = false
         status.text = message
         progress.visibility = View.GONE
         send.isEnabled = true
         input.isEnabled = true
+        updateModeButtons()
         input.requestFocus()
     }
 
     private fun setError(message: String) {
+        generationBusy = true
         status.text = message
         progress.visibility = View.GONE
         send.isEnabled = false
         input.isEnabled = false
+        updateModeButtons()
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
