@@ -1,7 +1,13 @@
-# Pocket AI v1.4
+# Pocket AI v1.5
 
-Pocket AI does not bundle an AI model in the APK. On first launch it downloads only **Qwen3-4B-Instruct-2507 Q6_K** (~3.31 GB), shows real GB/percent progress, verifies SHA-256, and then loads it locally through llama-android.
+Offline Android chat app using Qwen3-1.7B Q4_K_M.
 
-Interrupted downloads resume using HTTP Range. If the server does not honor Range, the partial file is safely restarted. Chat remains disabled until the exact Qwen3 model passes checksum verification.
+## v1.5 changes
+- Replaces the previous Qwen3 4B Q6_K model with Qwen3 1.7B Q4_K_M (~1.28 GB).
+- Deletes obsolete GGUF model files from the app's private model directory on startup.
+- Adds Fast mode (default) using Qwen3 `/no_think`.
+- Adds Thinking mode using Qwen3 `/think` for harder questions.
+- Keeps a 2048-token context and the existing 64dp bottom navigation clearance.
+- Shows generation speed in tokens/second after each response.
 
-Legacy Qwen2.5 build-time download/package logic has been removed. The 64dp bottom navigation clearance is retained.
+The GGUF model is not bundled in the APK. It downloads once, verifies SHA-256, then runs offline.
