@@ -1,7 +1,12 @@
-Pocket AI uses llama-android for local GGUF inference.
+Pocket AI uses the following third-party components:
 
-Runtime model: Qwen3-4B-Instruct-2507 Q6_K GGUF
-Quantization repository: bartowski/Qwen_Qwen3-4B-Instruct-2507-GGUF
-Original model: Qwen/Qwen3-4B-Instruct-2507
+1. llama-android (dev.ffmpegkit-maintained:llama-android:0.1.1)
+   Includes llama.cpp / ggml components under their respective open-source licenses.
 
-The model binary is not contained in the application source or APK. The app downloads the selected GGUF at runtime and verifies its SHA-256 before loading it.
+2. Qwen3-1.7B model weights
+   Model: Qwen/Qwen3-1.7B
+   GGUF quantization source: bartowski/Qwen_Qwen3-1.7B-GGUF
+   Quantization: Q4_K_M
+   Model license and terms remain those published by the model authors/distributors.
+
+No model weights are bundled in the APK; Pocket AI downloads the selected GGUF on first launch.

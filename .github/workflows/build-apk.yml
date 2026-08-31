@@ -29,12 +29,21 @@ jobs:
         with:
           gradle-version: '8.9'
 
-      - name: Build unsigned release APK
+      - name: Build release APK
         run: gradle :app:assembleRelease --stacktrace
 
-      - name: Upload APK
+      - name: Align APK
+        run: |
+          "$ANDROID_HOME/build-tools/35.0.0/zipalign" -p -f 4 \
+            app/build/outputs/apk/release/app-release-unsigned.apk \
+            PocketAI-v1.7-aligned-unsigned.apk
+          cp "$ANDROID_HOME/build-tools/35.0.0/lib/apksigner.jar" apksigner.jar
+
+      - name: Upload APK and signer
         uses: actions/upload-artifact@v4
         with:
-          name: PocketAI-v1.4-unsigned
-          path: app/build/outputs/apk/release/app-release-unsigned.apk
+          name: PocketAI-v1.7-aligned-signing-tools
+          path: |
+            PocketAI-v1.7-aligned-unsigned.apk
+            apksigner.jar
           if-no-files-found: error

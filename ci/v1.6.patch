@@ -1,0 +1,209 @@
+--- a/app/src/main/java/com/pierce/pocketai/MainActivity.kt
++++ b/app/src/main/java/com/pierce/pocketai/MainActivity.kt
+@@ -39,8 +39,11 @@
+         private const val MODEL_URL = "https://huggingface.co/bartowski/Qwen_Qwen3-1.7B-GGUF/resolve/main/Qwen_Qwen3-1.7B-Q4_K_M.gguf?download=true"
+         private const val MODEL_SHA256 = "72c5c3cb38fa32d5256e2fe30d03e7a64c6c79e668ad84057e3bd66e250b24fb"
+         private const val MODEL_EXPECTED_BYTES = 1_282_439_584L
+-        private const val SYSTEM_PROMPT =
+-            "You are Pocket AI, a concise and helpful offline assistant. Be accurate and admit uncertainty."
++        private const val BASE_SYSTEM_PROMPT =
++            "You are Pocket AI, a helpful general-purpose offline assistant. " +
++            "Answer the user's actual question directly. Prefer the common everyday meaning of words " +
++            "unless the user gives a different context. Do not invent definitions or facts. " +
++            "If you are genuinely uncertain, say so briefly."
+     }
+ 
+     private enum class ResponseMode(
+@@ -48,9 +51,14 @@
+         val directive: String,
+         val maxTokens: Int,
+         val historyTurns: Int,
++        val temperature: Float,
++        val topP: Float,
++        val topK: Int,
+     ) {
+-        FAST("Fast", "/no_think", 256, 3),
+-        THINKING("Thinking", "/think", 512, 4),
++        // Qwen3's recommended non-thinking sampler.
++        FAST("Fast", "/no_think", 256, 2, 0.7f, 0.8f, 20),
++        // Qwen3's recommended thinking sampler.
++        THINKING("Thinking", "/think", 512, 3, 0.6f, 0.95f, 20),
+     }
+ 
+     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+@@ -66,6 +74,7 @@
+     private lateinit var thinkingButton: Button
+ 
+     private var model: LlamaModel? = null
++    private var modelFile: File? = null
+     private var responseMode = ResponseMode.FAST
+     private var generationBusy = true
+ 
+@@ -205,10 +214,10 @@
+     }
+ 
+     private fun selectMode(mode: ResponseMode) {
+-        if (generationBusy || model == null) return
++        if (generationBusy || model == null || mode == responseMode) return
+         responseMode = mode
+         updateModeButtons()
+-        status.text = "Offline · Qwen3 1.7B · ${mode.label} mode"
++        reloadModelForMode(mode)
+     }
+ 
+     private fun updateModeButtons() {
+@@ -223,17 +232,13 @@
+     }
+ 
+     private fun prepareModel() {
+-        setBusy("Replacing previous model with Qwen3 1.7B…")
++        setBusy("Checking Qwen3 1.7B model…")
+         scope.launch {
+             try {
+-                val modelFile = withContext(Dispatchers.IO) { downloadModelIfNeeded() }
+-                status.text = "Loading Qwen3 1.7B…"
+-                val threads = min(4, Runtime.getRuntime().availableProcessors().coerceAtLeast(1))
+-                val loadedModel = Llama.loadModel(
+-                    modelFile.absolutePath,
+-                    LlamaConfig(contextSize = 2048, threads = threads),
+-                )
+-                model = loadedModel
++                val readyFile = withContext(Dispatchers.IO) { downloadModelIfNeeded() }
++                modelFile = readyFile
++                status.text = "Loading Qwen3 1.7B · Fast…"
++                model = loadModel(readyFile, ResponseMode.FAST)
+                 setReady("Offline · Qwen3 1.7B · Fast mode")
+             } catch (t: Throwable) {
+                 setError("Could not load AI: ${t.message ?: t.javaClass.simpleName}")
+@@ -241,6 +246,38 @@
+         }
+     }
+ 
++    private suspend fun loadModel(file: File, mode: ResponseMode): LlamaModel {
++        val threads = min(4, Runtime.getRuntime().availableProcessors().coerceAtLeast(1))
++        return Llama.loadModel(
++            file.absolutePath,
++            LlamaConfig(
++                contextSize = 2048,
++                threads = threads,
++                temperature = mode.temperature,
++                topP = mode.topP,
++                topK = mode.topK,
++            ),
++        )
++    }
++
++    private fun reloadModelForMode(mode: ResponseMode) {
++        val file = modelFile ?: return
++        setBusy("Switching to ${mode.label} mode…")
++        scope.launch {
++            try {
++                val oldModel = model
++                model = null
++                if (oldModel != null) {
++                    withContext(Dispatchers.Default) { Llama.releaseModel(oldModel) }
++                }
++                model = loadModel(file, mode)
++                setReady("Offline · Qwen3 1.7B · ${mode.label} mode")
++            } catch (t: Throwable) {
++                setError("Could not switch mode: ${t.message ?: t.javaClass.simpleName}")
++            }
++        }
++    }
++
+     private fun downloadModelIfNeeded(): File {
+         val dir = File(filesDir, "models").apply { mkdirs() }
+         cleanupObsoleteModels(dir)
+@@ -272,7 +309,7 @@
+             connection.instanceFollowRedirects = false
+             connection.connectTimeout = 30_000
+             connection.readTimeout = 60_000
+-            connection.setRequestProperty("User-Agent", "PocketAI/1.5")
++            connection.setRequestProperty("User-Agent", "PocketAI/1.6")
+             if (downloaded > 0) connection.setRequestProperty("Range", "bytes=$downloaded-")
+             connection.connect()
+ 
+@@ -378,13 +415,14 @@
+         setBusy(if (responseMode == ResponseMode.THINKING) "Thinking deeply…" else "Thinking…")
+ 
+         val modeForRequest = responseMode
+-        val prompt = buildPrompt(text, modeForRequest)
++        val prompt = buildUserPrompt(text, modeForRequest)
++        val systemPrompt = buildSystemPrompt(modeForRequest)
+         scope.launch {
+             try {
+                 val result = Llama.complete(
+                     loadedModel,
+                     prompt = prompt,
+-                    systemPrompt = SYSTEM_PROMPT,
++                    systemPrompt = systemPrompt,
+                     maxTokens = modeForRequest.maxTokens,
+                 )
+                 val answer = cleanModelOutput(result.text).ifEmpty { "I couldn't produce a response." }
+@@ -401,27 +439,43 @@
+         }
+     }
+ 
+-    private fun buildPrompt(newMessage: String, mode: ResponseMode): String = buildString {
++    // llama-android already wraps this string in the model's built-in user/assistant
++    // chat template. Do NOT add "User:" or "Assistant:" labels here.
++    private fun buildUserPrompt(newMessage: String, mode: ResponseMode): String =
++        "$newMessage\n\n${mode.directive}"
++
++    // llama-android 0.1.1 exposes one system message + one current user message.
++    // Put compact prior-turn memory in the real system message instead of pretending
++    // that a transcript is part of the user's current message.
++    private fun buildSystemPrompt(mode: ResponseMode): String = buildString {
++        append(BASE_SYSTEM_PROMPT)
+         val recent = history.toList().takeLast(mode.historyTurns)
+         if (recent.isNotEmpty()) {
+-            append("Conversation so far:\n")
++            append("\n\nRelevant memory from earlier turns:")
+             recent.forEach { (user, assistant) ->
+-                append("User: ").append(user).append('\n')
+-                append("Assistant: ").append(assistant).append('\n')
++                append("\n- Earlier the user asked: ")
++                append(user.replace("\n", " ").take(280))
++                append("\n  Pocket AI answered: ")
++                append(assistant.replace("\n", " ").take(420))
+             }
+-            append('\n')
++            append("\nUse that memory only when relevant. Answer the current user message directly.")
+         }
+-        append("User: ").append(newMessage).append(' ').append(mode.directive)
+-        append("\nAssistant:")
+     }
+ 
+     private fun cleanModelOutput(raw: String): String {
+-        val text = raw.trim()
++        var text = raw.trim()
+         val endThink = text.lastIndexOf("</think>")
+-        if (endThink >= 0) return text.substring(endThink + "</think>".length).trim()
+-        if (text.startsWith("<think>")) {
++        if (endThink >= 0) {
++            text = text.substring(endThink + "</think>".length).trim()
++        } else if (text.startsWith("<think>")) {
+             return "I used the available response budget while reasoning. Try a narrower question or switch to Fast mode."
+         }
++
++        // Defensive cleanup only; the model's EOG token should normally stop these.
++        text = text.replace("<|im_end|>", "").replace("<|endoftext|>", "").trim()
++        if (text.startsWith("Assistant:", ignoreCase = true)) {
++            text = text.substringAfter(':').trim()
++        }
+         return text
+     }
+ 
+--- a/app/build.gradle.kts
++++ b/app/build.gradle.kts
+@@ -11,8 +11,8 @@
+         applicationId = "com.pierce.pocketai"
+         minSdk = 24
+         targetSdk = 35
+-        versionCode = 6
+-        versionName = "1.5"
++        versionCode = 7
++        versionName = "1.6"
+         ndk { abiFilters += "arm64-v8a" }
+     }
+ 
