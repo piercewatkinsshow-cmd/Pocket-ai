@@ -1,0 +1,70 @@
+name: Build AI Fantasy Football Windows EXE
+
+on:
+  push:
+    branches: [windows-fantasy-football]
+    paths:
+      - 'windows-build/**'
+      - '.github/workflows/build-windows-fantasy.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Reconstruct source
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem windows-build/chunk*.txt | Sort-Object Name
+          if ($parts.Count -ne 7) { throw "Expected 7 source chunks, found $($parts.Count)." }
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('windows-src.zip', [Convert]::FromBase64String($b64))
+          Expand-Archive windows-src.zip -DestinationPath src -Force
+          if (!(Test-Path 'src/AIFantasyFootball.csproj')) { throw 'Source project was not reconstructed.' }
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore src/AIFantasyFootball.csproj
+
+      - name: Publish self-contained Windows x64 EXE
+        shell: pwsh
+        run: |
+          dotnet publish src/AIFantasyFootball.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o publish
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'publish/AI-Fantasy-Football.exe')) { throw 'EXE was not produced.' }
+          Get-Item 'publish/AI-Fantasy-Football.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'publish/AI-Fantasy-Football.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package documentation
+        shell: pwsh
+        run: Copy-Item 'src/README.md' 'publish/README.txt'
+
+      - name: Upload Windows build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Fantasy-Football-Windows-x64
+          path: publish/**
+          if-no-files-found: error
+          retention-days: 30
