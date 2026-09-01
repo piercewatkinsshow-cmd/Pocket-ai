@@ -36,14 +36,16 @@ jobs:
       - name: Apply V2.1 patch
         shell: pwsh
         run: |
-          $b64 = (Get-Content 'windows-ui-v21/v21rel.patch.gz.b64' -Raw).Trim()
-          [IO.File]::WriteAllBytes('v21rel.patch.gz', [Convert]::FromBase64String($b64))
-          $input = [IO.File]::OpenRead('v21rel.patch.gz')
+          $patchParts = Get-ChildItem 'windows-ui-v21/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 5) { throw "Expected 5 V2.1 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v21exact.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v21exact.patch.gz')
           $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
-          $output = [IO.File]::Create('v21rel.patch')
+          $output = [IO.File]::Create('v21exact.patch')
           $gzip.CopyTo($output)
           $output.Dispose(); $gzip.Dispose(); $input.Dispose()
-          git apply --directory=src-v2 --verbose v21rel.patch
+          git apply --directory=src-v2 --verbose v21exact.patch
           if ($LASTEXITCODE -ne 0) { throw 'V2.1 source patch failed.' }
           Select-String -Path 'src-v2/README.md' -Pattern 'V2.1' | Out-Null
           Select-String -Path 'src-v2/MainForm.cs' -Pattern 'ExportLeague' | Out-Null
