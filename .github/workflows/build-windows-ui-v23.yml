@@ -1,0 +1,74 @@
+name: Build AI Fantasy Football UI V2.3
+
+on:
+  push:
+    branches: [windows-ui-v2.3]
+    paths:
+      - 'windows-ui-v23/**'
+      - '.github/workflows/build-windows-ui-v23.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Reconstruct V2.3 source
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem windows-ui-v23/chunk*.txt | Sort-Object Name
+          if ($parts.Count -ne 9) { throw "Expected 9 V2.3 source chunks, found $($parts.Count)." }
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('windows-ui-v23-src.zip', [Convert]::FromBase64String($b64))
+          Expand-Archive windows-ui-v23-src.zip -DestinationPath src-v23 -Force
+          if (!(Test-Path 'src-v23/AIFantasyFootballV2.csproj')) { throw 'V2.3 source project was not reconstructed.' }
+          Select-String -Path 'src-v23/MainForm.cs' -Pattern 'Gemma League V2.3' | Out-Null
+          Select-String -Path 'src-v23/Services.cs' -Pattern 'DraftPositionMax' | Out-Null
+          Select-String -Path 'src-v23/MainForm.cs' -Pattern 'GenerateAutonomousBoardActivityAsync' | Out-Null
+          Select-String -Path 'src-v23/MainForm.cs' -Pattern 'ResetLeagueAndRestart' | Out-Null
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore src-v23/AIFantasyFootballV2.csproj
+
+      - name: Publish self-contained Windows x64 EXE
+        shell: pwsh
+        run: |
+          dotnet publish src-v23/AIFantasyFootballV2.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o publish-v23
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'publish-v23/AI-Fantasy-Football.exe')) { throw 'V2.3 EXE was not produced.' }
+          Get-Item 'publish-v23/AI-Fantasy-Football.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'publish-v23/AI-Fantasy-Football.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package documentation
+        shell: pwsh
+        run: Copy-Item 'src-v23/README.md' 'publish-v23/README.txt'
+
+      - name: Upload Windows V2.3 build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Fantasy-Football-Windows-UI-V2.3
+          path: publish-v23/**
+          if-no-files-found: error
+          retention-days: 30
