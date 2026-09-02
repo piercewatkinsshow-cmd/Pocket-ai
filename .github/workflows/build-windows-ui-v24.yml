@@ -1,0 +1,119 @@
+name: Build AI Fantasy Football UI V2.4
+
+on:
+  push:
+    branches: [windows-ui-v2.4]
+    paths:
+      - 'windows-ui-v24/**'
+      - '.github/workflows/build-windows-ui-v24.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Reconstruct V2 source
+        shell: pwsh
+        run: |
+          $parts = Get-ChildItem windows-ui-v2/chunk*.txt | Sort-Object Name
+          if ($parts.Count -ne 8) { throw "Expected 8 V2 source chunks, found $($parts.Count)." }
+          $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('windows-ui-v2-src.zip', [Convert]::FromBase64String($b64))
+          Expand-Archive windows-ui-v2-src.zip -DestinationPath src-v2 -Force
+          if (!(Test-Path 'src-v2/AIFantasyFootballV2.csproj')) { throw 'V2 source project was not reconstructed.' }
+
+      - name: Apply V2.1 patch
+        shell: pwsh
+        run: |
+          $patchParts = Get-ChildItem 'windows-ui-v21/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 5) { throw "Expected 5 V2.1 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v21.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v21.patch.gz'); $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress); $output = [IO.File]::Create('v21.patch'); $gzip.CopyTo($output); $output.Dispose(); $gzip.Dispose(); $input.Dispose()
+          git apply --directory=src-v2 --verbose v21.patch
+          if ($LASTEXITCODE -ne 0) { throw 'V2.1 source patch failed.' }
+
+      - name: Apply V2.2 patch
+        shell: pwsh
+        run: |
+          $patchParts = Get-ChildItem 'windows-ui-v22/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 3) { throw "Expected 3 V2.2 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v22.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v22.patch.gz'); $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress); $output = [IO.File]::Create('v22.patch'); $gzip.CopyTo($output); $output.Dispose(); $gzip.Dispose(); $input.Dispose()
+          git apply --directory=src-v2 --verbose v22.patch
+          if ($LASTEXITCODE -ne 0) { throw 'V2.2 source patch failed.' }
+
+      - name: Apply V2.3 patch
+        shell: pwsh
+        run: |
+          $patchParts = Get-ChildItem 'windows-ui-v23/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 2) { throw "Expected 2 V2.3 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v23.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v23.patch.gz'); $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress); $output = [IO.File]::Create('v23.patch'); $gzip.CopyTo($output); $output.Dispose(); $gzip.Dispose(); $input.Dispose()
+          git apply --directory=src-v2 --verbose v23.patch
+          if ($LASTEXITCODE -ne 0) { throw 'V2.3 source patch failed.' }
+
+      - name: Apply V2.4 Gemma-manager patch
+        shell: pwsh
+        run: |
+          $patchParts = Get-ChildItem 'windows-ui-v24/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 3) { throw "Expected 3 V2.4 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v24.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v24.patch.gz'); $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress); $output = [IO.File]::Create('v24.patch'); $gzip.CopyTo($output); $output.Dispose(); $gzip.Dispose(); $input.Dispose()
+          git apply --directory=src-v2 --verbose v24.patch
+          if ($LASTEXITCODE -ne 0) { throw 'V2.4 source patch failed.' }
+          if (!(Test-Path 'src-v2/GemmaManager.cs')) { throw 'GemmaManager.cs was not created.' }
+          Select-String -Path 'src-v2/MainForm.cs' -Pattern 'Gemma Manager League V2.4' | Out-Null
+          Select-String -Path 'src-v2/MainForm.cs' -Pattern 'RunGemmaDraftAsync' | Out-Null
+          Select-String -Path 'src-v2/GemmaManager.cs' -Pattern 'BuildRosterPlanAsync' | Out-Null
+          Select-String -Path 'src-v2/Services.cs' -Pattern 'ChatJsonAsync' | Out-Null
+
+      - name: Restore
+        shell: pwsh
+        run: dotnet restore src-v2/AIFantasyFootballV2.csproj
+
+      - name: Publish self-contained Windows x64 EXE
+        shell: pwsh
+        run: |
+          dotnet publish src-v2/AIFantasyFootballV2.csproj `
+            -c Release `
+            -r win-x64 `
+            --self-contained true `
+            -p:PublishSingleFile=true `
+            -p:EnableCompressionInSingleFile=true `
+            -p:DebugType=None `
+            -p:DebugSymbols=false `
+            -o publish-v24
+
+      - name: Verify executable
+        shell: pwsh
+        run: |
+          if (!(Test-Path 'publish-v24/AI-Fantasy-Football.exe')) { throw 'V2.4 EXE was not produced.' }
+          Get-Item 'publish-v24/AI-Fantasy-Football.exe' | Format-List Name,Length,LastWriteTime
+          Get-FileHash 'publish-v24/AI-Fantasy-Football.exe' -Algorithm SHA256 | Format-List
+
+      - name: Package documentation
+        shell: pwsh
+        run: Copy-Item 'src-v2/README.md' 'publish-v24/README.txt'
+
+      - name: Upload Windows V2.4 build
+        uses: actions/upload-artifact@v4
+        with:
+          name: AI-Fantasy-Football-Windows-UI-V2.4-Gemma-Manager
+          path: publish-v24/**
+          if-no-files-found: error
+          retention-days: 30
