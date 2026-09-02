@@ -23,28 +23,73 @@ jobs:
         with:
           dotnet-version: '8.0.x'
 
-      - name: Reconstruct V2.3 source
+      - name: Reconstruct V2 source
         shell: pwsh
         run: |
-          $parts = Get-ChildItem windows-ui-v23/chunk*.txt | Sort-Object Name
-          if ($parts.Count -ne 9) { throw "Expected 9 V2.3 source chunks, found $($parts.Count)." }
+          $parts = Get-ChildItem windows-ui-v2/chunk*.txt | Sort-Object Name
+          if ($parts.Count -ne 8) { throw "Expected 8 V2 source chunks, found $($parts.Count)." }
           $b64 = ($parts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
-          [IO.File]::WriteAllBytes('windows-ui-v23-src.zip', [Convert]::FromBase64String($b64))
-          Expand-Archive windows-ui-v23-src.zip -DestinationPath src-v23 -Force
-          if (!(Test-Path 'src-v23/AIFantasyFootballV2.csproj')) { throw 'V2.3 source project was not reconstructed.' }
-          Select-String -Path 'src-v23/MainForm.cs' -Pattern 'Gemma League V2.3' | Out-Null
-          Select-String -Path 'src-v23/Services.cs' -Pattern 'DraftPositionMax' | Out-Null
-          Select-String -Path 'src-v23/MainForm.cs' -Pattern 'GenerateAutonomousBoardActivityAsync' | Out-Null
-          Select-String -Path 'src-v23/MainForm.cs' -Pattern 'ResetLeagueAndRestart' | Out-Null
+          [IO.File]::WriteAllBytes('windows-ui-v2-src.zip', [Convert]::FromBase64String($b64))
+          Expand-Archive windows-ui-v2-src.zip -DestinationPath src-v2 -Force
+          if (!(Test-Path 'src-v2/AIFantasyFootballV2.csproj')) { throw 'V2 source project was not reconstructed.' }
+
+      - name: Apply V2.1 patch
+        shell: pwsh
+        run: |
+          $patchParts = Get-ChildItem 'windows-ui-v21/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 5) { throw "Expected 5 V2.1 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v21exact.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v21exact.patch.gz')
+          $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+          $output = [IO.File]::Create('v21exact.patch')
+          $gzip.CopyTo($output)
+          $output.Dispose(); $gzip.Dispose(); $input.Dispose()
+          git apply --directory=src-v2 --verbose v21exact.patch
+          if ($LASTEXITCODE -ne 0) { throw 'V2.1 source patch failed.' }
+
+      - name: Apply V2.2 patch
+        shell: pwsh
+        run: |
+          $patchParts = Get-ChildItem 'windows-ui-v22/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 3) { throw "Expected 3 V2.2 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v22.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v22.patch.gz')
+          $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+          $output = [IO.File]::Create('v22.patch')
+          $gzip.CopyTo($output)
+          $output.Dispose(); $gzip.Dispose(); $input.Dispose()
+          git apply --directory=src-v2 --verbose v22.patch
+          if ($LASTEXITCODE -ne 0) { throw 'V2.2 source patch failed.' }
+
+      - name: Apply V2.3 patch
+        shell: pwsh
+        run: |
+          $patchParts = Get-ChildItem 'windows-ui-v23/patch-part*.txt' | Sort-Object Name
+          if ($patchParts.Count -ne 2) { throw "Expected 2 V2.3 patch parts, found $($patchParts.Count)." }
+          $b64 = ($patchParts | ForEach-Object { (Get-Content $_.FullName -Raw).Trim() }) -join ''
+          [IO.File]::WriteAllBytes('v23.patch.gz', [Convert]::FromBase64String($b64))
+          $input = [IO.File]::OpenRead('v23.patch.gz')
+          $gzip = [IO.Compression.GzipStream]::new($input, [IO.Compression.CompressionMode]::Decompress)
+          $output = [IO.File]::Create('v23.patch')
+          $gzip.CopyTo($output)
+          $output.Dispose(); $gzip.Dispose(); $input.Dispose()
+          git apply --directory=src-v2 --verbose v23.patch
+          if ($LASTEXITCODE -ne 0) { throw 'V2.3 source patch failed.' }
+          Select-String -Path 'src-v2/MainForm.cs' -Pattern 'Gemma League V2.3' | Out-Null
+          Select-String -Path 'src-v2/Services.cs' -Pattern 'DraftPositionMax' | Out-Null
+          Select-String -Path 'src-v2/MainForm.cs' -Pattern 'GenerateAutonomousBoardActivityAsync' | Out-Null
+          Select-String -Path 'src-v2/MainForm.cs' -Pattern 'ResetLeagueAndRestart' | Out-Null
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore src-v23/AIFantasyFootballV2.csproj
+        run: dotnet restore src-v2/AIFantasyFootballV2.csproj
 
       - name: Publish self-contained Windows x64 EXE
         shell: pwsh
         run: |
-          dotnet publish src-v23/AIFantasyFootballV2.csproj `
+          dotnet publish src-v2/AIFantasyFootballV2.csproj `
             -c Release `
             -r win-x64 `
             --self-contained true `
@@ -63,7 +108,7 @@ jobs:
 
       - name: Package documentation
         shell: pwsh
-        run: Copy-Item 'src-v23/README.md' 'publish-v23/README.txt'
+        run: Copy-Item 'src-v2/README.md' 'publish-v23/README.txt'
 
       - name: Upload Windows V2.3 build
         uses: actions/upload-artifact@v4
