@@ -66,14 +66,14 @@ public sealed class GemmaManagerService
         var valid = candidates.Select(p => p.Id).ToHashSet(StringComparer.OrdinalIgnoreCase);
         string candidateText = PlayerLines(candidates);
         string caps = "Roster caps: QB max 2, TE max 3, K max 2, DEF max 2. The final 15-player roster must be capable of filling QB, 2 RB, 2 WR, TE, FLEX, K, DEF and 6 bench spots.";
-        string system = $"""
-You are {team.OwnerName}, the actual general manager of {team.TeamName} in a 6-team half-PPR fantasy football league.
-Personality: {team.Personality}
-Risk tolerance: {team.RiskTolerance}/100.
+        string system = $$"""
+You are {{team.OwnerName}}, the actual general manager of {{team.TeamName}} in a 6-team half-PPR fantasy football league.
+Personality: {{team.Personality}}
+Risk tolerance: {{team.RiskTolerance}}/100.
 You—not a formula—are responsible for this team's football decisions. Build your own ranked draft board according to your philosophy, player quality, positional scarcity, injuries, roster construction, and upside/floor preferences.
-{caps}
+{{caps}}
 Return JSON only, with exactly this shape:
-{{"strategy":"one short sentence","playerIds":["id1","id2",...]}}
+{"strategy":"one short sentence","playerIds":["id1","id2",...]}
 Use ONLY the supplied player IDs. Return at least 85 unique player IDs, ordered from most preferred to least preferred. Include enough late-round K and DEF options that a legal complete roster can still be drafted. Do not use markdown.
 """;
         string user = $"Season {s.Season}. Current consensus player pool:\n{candidateText}";
@@ -94,10 +94,10 @@ Use ONLY the supplied player IDs. Return at least 85 unique player IDs, ordered 
         var list = available.Take(40).ToList();
         if (list.Count == 0) return null;
         string roster = RosterLines(s, team);
-        string system = $"""
-You are {team.OwnerName}, general manager of {team.TeamName}. Personality: {team.Personality}.
+        string system = $$"""
+You are {{team.OwnerName}}, general manager of {{team.TeamName}}. Personality: {{team.Personality}}.
 Your pre-draft board has been exhausted at this pick, so YOU must choose the replacement pick. The league engine will only validate legality.
-Return JSON only: {{"playerId":"one supplied id","reason":"short reason"}}. Use only an AVAILABLE player ID. Do not use markdown.
+Return JSON only: {"playerId":"one supplied id","reason":"short reason"}. Use only an AVAILABLE player ID. Do not use markdown.
 """;
         string user = $"Round {round}. Current roster:\n{roster}\n\nAVAILABLE candidates:\n{PlayerLines(list)}";
         var decision = await _ai.ChatJsonAsync<GemmaDraftPickDecision>(s, system, user, ct, 450, .5);
@@ -121,35 +121,35 @@ Return JSON only: {{"playerId":"one supplied id","reason":"short reason"}}. Use 
         string headlines = data.Headlines.Count == 0 ? "No fresh headline feed available." : string.Join("\n", data.Headlines.Take(8));
         string warnings = data.Warnings.Count == 0 ? "None" : string.Join(" | ", data.Warnings);
 
-        string system = $"""
-You are {team.OwnerName}, the actual autonomous general manager of {team.TeamName} in a 6-team half-PPR fantasy league.
-Personality: {team.Personality}
-Risk tolerance: {team.RiskTolerance}/100.
+        string system = $$"""
+You are {{team.OwnerName}}, the actual autonomous general manager of {{team.TeamName}} in a 6-team half-PPR fantasy league.
+Personality: {{team.Personality}}
+Risk tolerance: {{team.RiskTolerance}}/100.
 You directly control this AI franchise. Decide whether the roster should make waiver claims and whether YOU want to propose a one-for-one trade. It is completely valid to make no move. Do not make moves just to be active.
 The league engine will only enforce legality and waiver priority; it will NOT substitute its own football judgment.
 Return JSON only in this shape:
-{{"waiverClaims":[{{"addPlayerId":"id","dropPlayerId":"id or empty","priority":1,"reason":"short"}}],"tradeProposals":[{{"toTeamId":1,"givePlayerId":"id","receivePlayerId":"id","reason":"short"}}],"summary":"short GM summary"}}
+{"waiverClaims":[{"addPlayerId":"id","dropPlayerId":"id or empty","priority":1,"reason":"short"}],"tradeProposals":[{"toTeamId":1,"givePlayerId":"id","receivePlayerId":"id","reason":"short"}],"summary":"short GM summary"}
 Rules: maximum 3 waiver claims in priority order; maximum 1 trade proposal from you this management cycle; only use supplied player/team IDs; do not trade K or DEF; do not invent players; empty arrays are encouraged when no move improves your team. Do not use markdown.
 """;
-        string user = $"""
-Fantasy Week {s.CurrentWeek}, season {s.Season}.
-Your record: {team.Record}. This week's opponent: {(opp == null ? "unknown" : opp.TeamName + " " + opp.Record)}.
-DATA WARNINGS: {warnings}
+        string user = $$"""
+Fantasy Week {{s.CurrentWeek}}, season {{s.Season}}.
+Your record: {{team.Record}}. This week's opponent: {{(opp == null ? "unknown" : opp.TeamName + " " + opp.Record)}}.
+DATA WARNINGS: {{warnings}}
 
 YOUR ROSTER:
-{RosterLines(s, team)}
+{{RosterLines(s, team)}}
 
 TOP AVAILABLE FREE AGENTS:
-{PlayerLines(freeAgents)}
+{{PlayerLines(freeAgents)}}
 
 LEAGUE STANDINGS:
-{standings}
+{{standings}}
 
 OTHER TEAM ROSTERS (tradeable positions shown):
-{others}
+{{others}}
 
 CURRENT NFL HEADLINES:
-{headlines}
+{{headlines}}
 """;
         return await _ai.ChatJsonAsync<GemmaRosterPlanDecision>(s, system, user, ct, 1300, .62);
     }
@@ -164,20 +164,20 @@ CURRENT NFL HEADLINES:
             opp = s.Teams.FirstOrDefault(t => t.Id == oppId);
         }
         string headlines = data == null || data.Headlines.Count == 0 ? "No fresh headlines supplied." : string.Join("\n", data.Headlines.Take(8));
-        string system = $"""
-You are {team.OwnerName}, the actual head coach/general manager of {team.TeamName}. Personality: {team.Personality}.
+        string system = $$"""
+You are {{team.OwnerName}}, the actual head coach/general manager of {{team.TeamName}}. Personality: {{team.Personality}}.
 YOU choose the starting lineup. Consider injury status, opponent, recent production, season production, projection/rank as imperfect inputs, player news, floor/upside, and your own managerial philosophy. The code will only validate position eligibility and game locks; it will not choose starters for you.
 Return JSON only with exactly these nine keys inside lineup: QB,RB1,RB2,WR1,WR2,TE,FLEX,K,DEF. Every value must be a player ID from YOUR ROSTER. Use each player at most once. FLEX must be RB/WR/TE.
-Shape: {{"lineup":{{"QB":"id","RB1":"id","RB2":"id","WR1":"id","WR2":"id","TE":"id","FLEX":"id","K":"id","DEF":"id"}},"reasoning":"one or two concise sentences"}}
+Shape: {"lineup":{"QB":"id","RB1":"id","RB2":"id","WR1":"id","WR2":"id","TE":"id","FLEX":"id","K":"id","DEF":"id"},"reasoning":"one or two concise sentences"}
 Do not use markdown.
 """;
-        string user = $"""
-Week {s.CurrentWeek}. Record {team.Record}. Opponent: {(opp == null ? "unknown" : opp.TeamName + " " + opp.Record)}.
+        string user = $$"""
+Week {{s.CurrentWeek}}. Record {{team.Record}}. Opponent: {{(opp == null ? "unknown" : opp.TeamName + " " + opp.Record)}}.
 YOUR ROSTER (LOCKED means the NFL game has started and that player's current slot cannot be changed):
-{RosterLines(s, team, includeLock: true)}
+{{RosterLines(s, team, includeLock: true)}}
 CURRENT NFL HEADLINES:
-{headlines}
-{(string.IsNullOrWhiteSpace(correction) ? "" : "\nCORRECTION REQUIRED FROM YOUR PREVIOUS LINEUP: " + correction)}
+{{headlines}}
+{{(string.IsNullOrWhiteSpace(correction) ? "" : "\nCORRECTION REQUIRED FROM YOUR PREVIOUS LINEUP: " + correction)}}
 """;
         return await _ai.ChatJsonAsync<GemmaLineupDecision>(s, system, user, ct, 750, .48);
     }
@@ -187,16 +187,18 @@ CURRENT NFL HEADLINES:
         var give = LeagueEngine.PlayerById(s, proposerGivesId);
         var receive = LeagueEngine.PlayerById(s, targetGivesId);
         if (give == null || receive == null) return null;
-        string system = $"""
-You are {target.OwnerName}, autonomous GM of {target.TeamName}. Personality: {target.Personality}. Risk tolerance {target.RiskTolerance}/100.
+        string system = $$"""
+You are {{target.OwnerName}}, autonomous GM of {{target.TeamName}}. Personality: {{target.Personality}}. Risk tolerance {{target.RiskTolerance}}/100.
 Another AI owner proposed a trade. YOU decide whether your franchise accepts, rejects, or counters. The engine does not judge fairness for you; it only checks legality.
-Return JSON only: {{"decision":"ACCEPT|REJECT|COUNTER","reason":"short","counterGivePlayerId":"id or empty","counterReceivePlayerId":"id or empty"}}.
+Return JSON only: {"decision":"ACCEPT|REJECT|COUNTER","reason":"short","counterGivePlayerId":"id or empty","counterReceivePlayerId":"id or empty"}.
 If COUNTER: counterGivePlayerId must be a QB/RB/WR/TE from YOUR roster and counterReceivePlayerId must be a QB/RB/WR/TE from the proposer's roster. If not countering, leave both counter IDs empty. Do not use markdown.
 """;
-        string user = $"""
-Week {s.CurrentWeek}. {proposer.OwnerName} ({proposer.TeamName}) offers you {give.Name} ({give.Position}, rank {give.SearchRank}, proj {give.Projection:0.0}, season {give.SeasonFantasyPoints:0.0}, last {give.LastWeekFantasyPoints:0.0}, injury {Safe(give.InjuryStatus)}) for your {receive.Name} ({receive.Position}, rank {receive.SearchRank}, proj {receive.Projection:0.0}, season {receive.SeasonFantasyPoints:0.0}, last {receive.LastWeekFantasyPoints:0.0}, injury {Safe(receive.InjuryStatus)}).
-YOUR ROSTER:\n{RosterLines(s, target, tradableOnly: true)}
-PROPOSER ROSTER:\n{RosterLines(s, proposer, tradableOnly: true)}
+        string user = $$"""
+Week {{s.CurrentWeek}}. {{proposer.OwnerName}} ({{proposer.TeamName}}) offers you {{give.Name}} ({{give.Position}}, rank {{give.SearchRank}}, proj {{give.Projection:0.0}}, season {{give.SeasonFantasyPoints:0.0}}, last {{give.LastWeekFantasyPoints:0.0}}, injury {{Safe(give.InjuryStatus)}}) for your {{receive.Name}} ({{receive.Position}}, rank {{receive.SearchRank}}, proj {{receive.Projection:0.0}}, season {{receive.SeasonFantasyPoints:0.0}}, last {{receive.LastWeekFantasyPoints:0.0}}, injury {{Safe(receive.InjuryStatus)}}).
+YOUR ROSTER:
+{{RosterLines(s, target, tradableOnly: true)}}
+PROPOSER ROSTER:
+{{RosterLines(s, proposer, tradableOnly: true)}}
 """;
         return await _ai.ChatJsonAsync<GemmaTradeDecision>(s, system, user, ct, 600, .58);
     }
